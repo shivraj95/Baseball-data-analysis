@@ -1,0 +1,135 @@
+---
+title: "Statistically Modeling Baseball Data"
+author: 'Shivraj Gill '
+date: "November 4, 2015"
+output: html_document
+---
+
+
+# Your Report
+
+## The Statistical Question
+
+1. Does a team's salary affect the team's regular season performance?
+
+
+
+2. Have the number of team Homeruns and peak Homeruns changed after the 2007 Mitchell report? (For fun/curiosity)
+
+
+## The Analysis
+
+__1.__ This question basically explores whether money can buy a team  success. I will first create a data set with a team's salary and then compare it to the number of wins it got that same season. I will be looking at the 2008 regular season. 
+```{r}
+library(Lahman)
+library(dplyr)
+library(ggplot2)
+
+players <- group_by(Salaries, lgID, teamID, yearID) #groups by player salaries,league ID, teamID, and yearID
+teamSalaries <- summarise(players, TSalary = sum(as.numeric(salary))) #team salaries 
+teamSalaries08 <- filter(teamSalaries, yearID == 2008)
+teams08 <- filter(Teams, yearID == 2008)
+teams08 <- select(teams08, yearID, lgID, teamID, W) #only care about the information of the team and number of wins 
+teams08 <- arrange(teams08, teamID)
+SalaryvsWin <- merge(teams08, teamSalaries08)
+ggplot(SalaryvsWin, aes(x = TSalary, y = W)) + geom_point()
+#the graph shows that there are some bad leverage points 
+
+model <- lm(W ~ TSalary, data = SalaryvsWin)
+
+summary(model)
+
+
+```
+
+There are clearly some leverage points in our model. I found that the outermost point is the New York Yankees. It makes sense that big market teams that do not perform well would be clear outliers in this plot.  Further, the correlation value is pretty low. Let's look at some more plots of standardized residuals to see if there are any patterns in the residuals before we make any conclusions of our model. 
+
+```{r}
+
+ggplot(fortify(model), aes(x=TSalary, y=.stdresid)) + geom_point()
+qqnorm(SalaryvsWin$TSalary) 
+qqnorm(SalaryvsWin$W)
+
+```
+
+
+The Yankee leverage point is quite evident in the first standardized residual plot. We can use the cook's distance plot to measure how much influence this point and other leverage points have on our model. 
+
+```{r}
+ggplot(fortify(model), aes(x=TSalary, y=.cooksd)) +  geom_point()
+```
+
+The cook's distance shows that there are many leverage points that have a lot of influence on our model. We can try transforming both y and x to address these problem of nonlinearity. 
+
+```{r}
+library(car)
+
+summary(pow <- powerTransform(SalaryvsWin[,c(4,5)]))
+
+```
+
+The summary of our transformation model tells us that that the p-value is actually greatest when we don't transform. So our power transform tells us that our best representation of the model is with no transform. To illustrate this further, we can use the good lambda values given by our summary and see that our new transformed plot still does not fix problems with linearity. 
+
+```{r}
+trans <- bcPower(SalaryvsWin[,c(4,5)], c(1.8, .441))
+
+names(trans) <- c("transformedWins", "transformedSalary")
+ggplot(trans, aes(x = transformedSalary, y = transformedWins)) + geom_point() + stat_smooth(method = "lm")
+
+```
+
+
+As seen, the plot does not fix problems with linearity. Furthermore, our earlier plots show that our errors are not normal(from the QQ plot) so we can say our model does not show any relation between wins and team Salary. The non-constant variance shown by our plots tell us that our model is incomplete. There are other factors outside of team salary that determine the number of wins in a season. _Thus, our analysis shows that team salary is not a good indicator of team performance._ Because there a lot of factors in determining wins, I believe multiple regression would provide a better model for determining wins. For example, variables such as runs scored and runs allowed would be two important variables in the number of wins in a season. 
+
+
+
+
+
+
+
+
+
+__2.__ In 2007, the Mitchell report listed the players that had used steroids or performance-enhancing drugs in recent years. The list included about 90 players and lead to a lot of changes in the game such as increasing the number of drug tests. A lot of the players mentioned on the list played when the report was released so that is why I will look at the changes in team homeruns over a 17 year period. Further, I am only looking at homeruns because a lot of homerun records were shattered during this time. That is, I will look at homerun data 10 years before the report and 7 years after the report. I will first filter out the data to those years. I first want to check the number of homeruns per team over this 17 year change to see if there is any notable change. 
+
+```{r}
+data(Teams)
+teams <- Teams
+teams <- subset(teams, yearID > 1997)
+teams <- subset(teams, select = c(yearID, HR))
+ggplot(teams, aes(x = yearID, y = HR)) + geom_point()
+
+```
+
+There seems to be a slight decrease after 2007. Also, there seems to be some leverage points such as in the year 2010. This graph does not provide much insight, so I will now get the mean number of homeruns each year and plot that against the year. 
+```{r}
+
+averageHr = vector(, 17)
+hryears = vector(, 17)
+for(i in 1:17){
+  averageHr[i] = summarise(filter(teams, yearID == (1997 + i)), mean = mean(HR))
+  hryears[i] = 1997 + i
+}
+averageHr <- unlist(averageHr)
+
+homerunsData <- data.frame(averageHr, hryears)
+ggplot(homerunsData, aes(x = hryears, y = averageHr)) + geom_point() + geom_line() + stat_smooth(method = "lm")
+
+
+hrmodel <- lm(averageHr~hryears, data = homerunsData)
+summary(hrmodel)
+```
+
+
+The graph shows that there is definitely a decline of homeruns over the years. However, there is not enough data to show the full impact of the Mitchell report. No conclusions can be made until more seasons are played in order to be able to compare a longer set of years. I feel like a 20 year period, 10 years before the report and 10 years after the report would be enough data to see any signficant changes in team homeruns. Further, I wanted to look at peak Homeruns each season. 
+
+```{r}
+elgibleHitters <- filter(Batting, yearID > 1997)
+batHR <- subset(elgibleHitters, !is.na(HR)) 
+batHR <- group_by(batHR, yearID) 
+peakHr <- summarise(batHR, max = max(as.numeric(HR)))
+ggplot(peakHr, aes(x = yearID, y = max)) + geom_point()
+
+
+```
+
+While there is no a little drop off after 2007, we do see that there is a bigger decline in peak homeruns after 2001. Although there is not data yet to fully measure the impact of steroids and other performance enhancing drugs on homeruns, the data we do have does seem to indicate that there has been a drop off in team Homeruns and peak Homeruns. Once there is more data, we would be better tooled to make a model that assesses the impact of the Mitchell Report on homeruns. 
